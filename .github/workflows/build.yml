@@ -1,0 +1,43 @@
+name: Build horizon-client
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libudev-dev pkg-config cmake \
+            libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Build horizon-client (release)
+        run: cargo build --release -p horizon-client
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-client-linux-x86_64
+          path: target/release/horizon-client
+          if-no-files-found: error
