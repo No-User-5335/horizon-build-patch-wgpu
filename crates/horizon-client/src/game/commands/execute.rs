@@ -32,6 +32,8 @@ pub(in crate::game) struct Source {
     /// The command block whose output this source is
     /// (`BaseCommandBlock.CloseableCommandBlockSource`).
     pub block: Option<(i32, i32, i32)>,
+    /// The command block minecart whose output this source is.
+    pub cart: Option<u32>,
 }
 
 /// Where `execute store` writes.
@@ -94,6 +96,7 @@ impl Game<'_> {
             dimension: self.dim,
             level: None,
             block: None,
+            cart: None,
         }
     }
     /// The server as a source (function ticks and schedules): the world spawn.
@@ -108,9 +111,10 @@ impl Game<'_> {
             dimension: self.dim,
             level: None,
             block: None,
+            cart: None,
         }
     }
-    pub(super) fn target_rotation(&self, t: Target) -> [f32; 2] {
+    pub(in crate::game) fn target_rotation(&self, t: Target) -> [f32; 2] {
         match t {
             Target::Player => [self.yaw, self.pitch],
             Target::Guest(conn) => self
@@ -650,12 +654,24 @@ impl Game<'_> {
         };
         let found: Vec<Target> = match c.literals.last().map(String::as_str) {
             Some("owner") => match entity {
+                // OwnableEntity.getOwner → EntityReference.getLivingEntity:
+                // a marker or a display with that UUID is not an owner.
                 Target::Mob(id) => self
                     .mobs
                     .iter()
                     .find(|m| m.id == id)
                     .and_then(|m| m.extra.owner)
                     .and_then(|u| self.target_with_uuid(u))
+                    .filter(|owner| {
+                        matches!(
+                            owner,
+                            Target::Player
+                                | Target::Guest(_)
+                                | Target::Mob(_)
+                                | Target::Stand(_)
+                                | Target::Dragon(_)
+                        )
+                    })
                     .into_iter()
                     .collect(),
                 _ => Vec::new(),
@@ -674,7 +690,8 @@ impl Game<'_> {
                             self.target_by_uuid(horizon_client::lan::playerdata::ints_uuid(uuid))
                         }
                         horizon_client::mobs::leash::Holder::Mob(i) => Some(Target::Mob(i)),
-                        horizon_client::mobs::leash::Holder::Knot(_) => None,
+                        horizon_client::mobs::leash::Holder::Boat(_)
+                        | horizon_client::mobs::leash::Holder::Knot(_) => None,
                     })
                     .into_iter()
                     .collect(),
@@ -768,25 +785,25 @@ impl Game<'_> {
             })
             .collect()
     }
-    pub(super) fn target_with_uuid(&self, uuid: [i32; 4]) -> Option<Target> {
+    /// `ServerLevel.getEntity(UUID)`: any entity of the level in place, not
+    /// only mobs (displays, armor stands, items...). The map is keyed by id,
+    /// so a killed entity and a later summon of the same UUID can both be
+    /// in it; the one the level still holds is the entity.
+    pub(in crate::game) fn target_with_uuid(&self, uuid: [i32; 4]) -> Option<Target> {
         if Some(uuid) == self.level.player_uuid {
             return Some(Target::Player);
         }
-        let id = self
-            .persist
-            .uuids
-            .iter()
-            .find(|(_, u)| **u == uuid)
-            .map(|(id, _)| *id)?;
-        self.mobs
-            .iter()
-            .any(|m| m.id == id)
-            .then_some(Target::Mob(id))
+        self.persist.uuids.iter().find_map(|(&id, found)| {
+            if *found != uuid {
+                return None;
+            }
+            self.level_entity(i32::try_from(id).ok()?)
+        })
     }
     /// The highest block of a heightmap type at a column (`Level.getHeight`).
     fn heightmap_at(&self, kind: &str, x: i32, z: i32) -> i32 {
-        let top = horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT;
-        for y in (horizon_client::chunk::MIN_Y..top).rev() {
+        let top = self.world.top_y();
+        for y in (self.world.bottom_y()..top).rev() {
             let state = self.world.block(x, y, z);
             if state == self.world.air {
                 continue;
@@ -809,7 +826,7 @@ impl Game<'_> {
                 return y + 1;
             }
         }
-        horizon_client::chunk::MIN_Y
+        self.world.bottom_y()
     }
     /// A `store` modifier: a new callback in the source's chain.
     fn store_source(&mut self, c: &Context, s: Source) -> R<Source> {

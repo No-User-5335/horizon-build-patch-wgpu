@@ -8,6 +8,7 @@ use horizon_client::{
     Result,
     gamepad::{self, Button, Edges, GlyphStyle, HealthWatch, PadState, Rumble},
     keybinds::{KeyBinds, key_code, mouse_button},
+    keymapping::SNEAK,
 };
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -81,6 +82,13 @@ mod hardware {
 }
 
 impl Pads {
+    /// Include releases delayed until the next simulation tick.
+    pub(super) fn holds_action(&self, settings: &gamepad::PadSettings, action: &str) -> bool {
+        settings.binding(action).is_some_and(|button| {
+            self.edges.is_held(button) || self.late_releases.contains(&button)
+        })
+    }
+
     /// A new player entity took over (spawn, respawn, a server joined, a
     /// dimension change): its health is not compared with the old one's.
     pub(super) fn player_replaced(&mut self) {
@@ -213,12 +221,16 @@ impl Game<'_> {
             "key.sneak"
                 if self.settings.controller.toggle_sneak && !self.settings.toggle_crouch =>
             {
-                // A stick click flips sneaking instead of holding it.
-                if down {
-                    let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
-                    self.mapped_key(KeyCode::ShiftLeft, !sneaking, false)?;
+                // A stick click flips sneaking instead of holding it, as
+                // vanilla's toggle crouch does: a screen opening releases it
+                // and closing restores it (ToggleKeyMapping).
+                if !down {
+                    return Ok(());
                 }
-                Ok(())
+                let screen_open = self.screen != Screen::Playing || self.title.is_some();
+                self.toggles.pad_toggle(SNEAK, screen_open);
+                self.sync_toggle(SNEAK);
+                self.key_pressed(KeyCode::ShiftLeft)
             }
             _ => {
                 let default = KeyBinds::default_of(action);

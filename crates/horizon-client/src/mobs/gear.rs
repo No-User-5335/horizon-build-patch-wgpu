@@ -182,13 +182,18 @@ pub fn protection_points(g: &Gear, kind: DamageKind) -> f32 {
         DamageKind::OnFire
             | DamageKind::InFire
             | DamageKind::Campfire
+            | DamageKind::HotFloor
             | DamageKind::Lava
             | DamageKind::Fireball
             | DamageKind::SulfurCubeHot
     );
     let projectile = matches!(
         kind,
-        DamageKind::Arrow | DamageKind::Thrown | DamageKind::Fireball | DamageKind::WindCharge
+        DamageKind::Arrow
+            | DamageKind::Thrown
+            | DamageKind::Fireball
+            | DamageKind::WindCharge
+            | DamageKind::WitherSkull
     );
     let mut total = 0.0;
     for slot in ARMOR {
