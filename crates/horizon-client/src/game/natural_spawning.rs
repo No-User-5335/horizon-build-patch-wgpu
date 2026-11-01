@@ -164,7 +164,7 @@ impl GameLevel<'_, '_> {
     }
     fn biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
         let chunk = self.game.world.chunks.get(&(x >> 4, z >> 4))?;
-        Some(self.game.res.biomes().get(chunk.biome(x, y, z)))
+        Some(world_biomes!(self.game).get(chunk.biome(x, y, z)))
     }
     /// The block whose noise cell `BiomeManager.getBiome` reads.
     fn zoomed(&self, x: i32, y: i32, z: i32) -> [i32; 3] {
@@ -614,6 +614,10 @@ impl<'a> Game<'a> {
         let Some(terrain) = self.end.locator() else {
             return;
         };
+        // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs.
+        if terrain.is_flat() {
+            return;
+        }
         let mut region = terrain.region_random(cx, cz);
         let any = region.as_any();
         let added = if let Some(r) = any.downcast_mut::<LegacyRandom>() {
